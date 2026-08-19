@@ -16,16 +16,73 @@ const fetchBtn     = document.getElementById('fetchBtn');
 const fetchBtnText = document.getElementById('fetchBtnText');
 const fetchSpinner = document.getElementById('fetchSpinner');
 const fetchMsg     = document.getElementById('fetchMsg');
+const lyricsPreview = document.getElementById('lyricsPreview');
 
 // ---------------------------------------------------------------------------
-// Slider live update
+// Seeded PRNG (mulberry32) — keeps preview and PDF in sync
+// ---------------------------------------------------------------------------
+let maskSeed = null;
+
+function mulberry32(seed) {
+  return () => {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Slider live update + preview
 // ---------------------------------------------------------------------------
 slider.addEventListener('input', () => {
   const v = slider.value;
   pctLabel.textContent = v + '%';
   slider.style.setProperty('--pct', v + '%');
+  renderPreview();
 });
 slider.style.setProperty('--pct', slider.value + '%');
+
+document.getElementById('lyrics').addEventListener('input', () => {
+  maskSeed = null; // fresh seed whenever the text changes
+  renderPreview();
+});
+
+lyricsPreview.addEventListener('click', () => {
+  lyricsPreview.hidden = true;
+  const lyricsEl = document.getElementById('lyrics');
+  lyricsEl.hidden = false;
+  lyricsEl.focus();
+});
+
+function renderPreview() {
+  const lyricsEl = document.getElementById('lyrics');
+  const lyrics = lyricsEl.value;
+  const pct = parseInt(slider.value, 10);
+
+  if (!lyrics || pct === 0) {
+    lyricsPreview.hidden = true;
+    lyricsEl.hidden = false;
+    return;
+  }
+
+  if (maskSeed === null) maskSeed = Date.now();
+  const masked = maskLyrics(lyrics, pct, maskSeed);
+
+  lyricsPreview.innerHTML = masked
+    .split('\n')
+    .map(line => {
+      const esc = line
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      return esc.replace(/_{5,}/g, m => `<span class="blank">${' '.repeat(m.length)}</span>`);
+    })
+    .join('\n');
+
+  lyricsEl.hidden = true;
+  lyricsPreview.hidden = false;
+}
 
 // ---------------------------------------------------------------------------
 // Fetch lyrics: iTunes Lookup (track metadata) + LRCLIB (lyrics).
@@ -54,6 +111,8 @@ fetchBtn.addEventListener('click', async () => {
 
     const lyrics = await fetchLyrics(track);
     document.getElementById('lyrics').value = lyrics;
+    maskSeed = null;
+    renderPreview();
     showFetchMsg('Lyrics fetched! Review them before generating the PDF.', 'ok');
   } catch (err) {
     console.error('Fetch lyrics error:', err);
@@ -153,7 +212,7 @@ form.addEventListener('submit', async (e) => {
 
   setLoading(true);
   try {
-    const maskedLyrics = maskLyrics(lyrics, pct);
+    const maskedLyrics = maskLyrics(lyrics, pct, maskSeed ?? undefined);
     const qrDataUrl    = await generateQRDataUrl(appleUrl);
     generatePDF(title, maskedLyrics, qrDataUrl);
   } catch (err) {
@@ -166,7 +225,7 @@ form.addEventListener('submit', async (e) => {
 // ---------------------------------------------------------------------------
 // Masking
 // ---------------------------------------------------------------------------
-function maskLyrics(text, pct) {
+function maskLyrics(text, pct, seed) {
   if (pct === 0) return text;
 
   const wordRe = /[\p{L}\p{M}]+(?:'[\p{L}\p{M}]+)*/gu;
@@ -176,9 +235,10 @@ function maskLyrics(text, pct) {
   const count = Math.round(matches.length * pct / 100);
   if (count === 0) return text;
 
+  const rng = seed !== undefined ? mulberry32(seed) : Math.random;
   const pool = matches.map((_, i) => i);
   for (let i = pool.length - 1; i > 0 && pool.length - i <= count; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
   const masked = new Set(pool.slice(pool.length - count));

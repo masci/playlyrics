@@ -280,3 +280,27 @@ button[type="submit"]:disabled {
   top: -9999px;
   visibility: hidden;
 }
+
+#lyricsPreview {
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.95rem;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  min-height: 200px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-y: auto;
+  cursor: text;
+}
+
+.blank {
+  display: inline-block;
+  border-bottom: 2.5px solid var(--primary);
+  background: rgba(29, 111, 229, 0.09);
+  border-radius: 2px 2px 0 0;
+  vertical-align: -2px;
+  padding: 0 1px;
+}
