@@ -28,12 +28,9 @@ slider.addEventListener('input', () => {
 slider.style.setProperty('--pct', slider.value + '%');
 
 // ---------------------------------------------------------------------------
-// Fetch lyrics from Apple Music
+// Fetch lyrics: iTunes Lookup (track metadata) + LRCLIB (lyrics).
+// Both APIs are free, CORS-enabled, and need no authentication.
 // ---------------------------------------------------------------------------
-
-let cachedDevToken   = null;
-let musicKitInstance = null;
-const MUT_KEY = 'pl_music_user_token'; // Music User Token persisted across page loads
 
 fetchBtn.addEventListener('click', async () => {
   const url = document.getElementById('appleUrl').value.trim();
@@ -52,21 +49,15 @@ fetchBtn.addEventListener('click', async () => {
   hideFetchMsg();
 
   try {
-    const devToken = await getDeveloperToken();
-    const { musicUserToken } = await getAuthorizedMusicKit(devToken, parsed.storefront);
+    const track = await fetchTrackInfo(parsed.songId, parsed.storefront);
+    document.getElementById('songTitle').value = `${track.trackName} — ${track.artistName}`;
 
-    // Fetch song metadata and lyrics in parallel
-    const [songAttrs, ttml] = await Promise.all([
-      fetchSongAttributes(devToken, parsed.storefront, parsed.songId),
-      fetchLyricsTtml(devToken, musicUserToken, parsed.storefront, parsed.songId),
-    ]);
-
-    document.getElementById('songTitle').value = `${songAttrs.name} — ${songAttrs.artistName}`;
-    document.getElementById('lyrics').value = parseTtml(ttml);
+    const lyrics = await fetchLyrics(track);
+    document.getElementById('lyrics').value = lyrics;
     showFetchMsg('Lyrics fetched! Review them before generating the PDF.', 'ok');
   } catch (err) {
     console.error('Fetch lyrics error:', err);
-    showFetchMsg(err?.message || err?.description || String(err) || 'An unknown error occurred.', 'error');
+    showFetchMsg(err?.message || String(err) || 'An unknown error occurred.', 'error');
   } finally {
     setFetchLoading(false);
   }
@@ -91,112 +82,56 @@ function parseAppleMusicUrl(url) {
   }
 }
 
-async function getDeveloperToken() {
-  if (cachedDevToken) return cachedDevToken;
-  const res = await fetch('/.netlify/functions/token');
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || 'Could not reach the token endpoint. Is the app deployed on Netlify?');
+// iTunes Lookup: resolves an Apple track ID to metadata. The storefront from
+// the URL doubles as the country code.
+async function fetchTrackInfo(songId, country) {
+  const res = await fetch(`https://itunes.apple.com/lookup?id=${songId}&country=${country}`);
+  if (!res.ok) throw new Error(`Track lookup failed (${res.status}). Check the URL.`);
+  // The endpoint responds with content-type text/javascript, so parse manually.
+  const data = JSON.parse(await res.text());
+  if (!data.resultCount || !data.results?.[0]?.trackName) {
+    throw new Error('Track not found. Make sure the URL points to a single song.');
   }
-  const { token, error } = await res.json();
-  if (error) throw new Error(error);
-  cachedDevToken = token;
-  return token;
+  return data.results[0];
 }
 
-async function getAuthorizedMusicKit(devToken, storefront) {
-  // Validate the developer token with a simple catalog call before handing it
-  // to MusicKit — surfaces token problems as a clear error instead of the
-  // generic "Storefront Country Code error" MusicKit throws internally.
-  const probe = await fetch(
-    `https://api.music.apple.com/v1/storefronts/${storefront}`,
-    { headers: { Authorization: `Bearer ${devToken}` } }
-  );
-  if (!probe.ok) {
-    throw new Error(
-      `Developer token rejected by Apple Music (HTTP ${probe.status}). ` +
-      `Check that APPLE_TEAM_ID, APPLE_KEY_ID, and APPLE_PRIVATE_KEY are set correctly in Netlify.`
-    );
+// LRCLIB: exact match first (artist + track + album + duration), then a looser
+// search as fallback.
+async function fetchLyrics(track) {
+  const params = new URLSearchParams({
+    artist_name: track.artistName,
+    track_name: track.trackName,
+  });
+  if (track.collectionName) params.set('album_name', track.collectionName);
+  if (track.trackTimeMillis) params.set('duration', Math.round(track.trackTimeMillis / 1000));
+
+  const res = await fetch(`https://lrclib.net/api/get?${params}`);
+
+  if (res.ok) {
+    const data = await res.json();
+    if (data.instrumental) throw new Error('This track is instrumental — no lyrics to fetch.');
+    if (data.plainLyrics) return data.plainLyrics;
+  } else if (res.status !== 404) {
+    throw new Error(`Lyrics lookup failed (${res.status}). Try again in a moment.`);
   }
 
-  if (!musicKitInstance) {
-    // Matches the configure signature from the MusicKit JS v1 docs exactly.
-    MusicKit.configure({
-      developerToken: devToken,
-      storefrontId: 'it',
-    });
-    musicKitInstance = MusicKit.getInstance();
-  }
-
-  // Check our own localStorage cache first — MusicKit's internal session restore
-  // is interrupted by the storefront error, so we persist the token ourselves.
-  let musicUserToken = localStorage.getItem(MUT_KEY) || musicKitInstance.musicUserToken;
-
-  if (!musicUserToken) {
-    try {
-      musicUserToken = await musicKitInstance.authorize();
-    } catch (err) {
-      // MusicKit v1 sometimes throws "Storefront Country Code error" after auth
-      // succeeds but its internal storefront lookup fails. If the token landed
-      // on the instance anyway, treat auth as successful and continue.
-      musicUserToken = musicKitInstance.musicUserToken;
-      if (!musicUserToken) throw err;
-    }
-  }
-
-  if (!musicUserToken) {
-    throw new Error('Apple Music sign-in completed but no user token was returned. Please try again.');
-  }
-
-  localStorage.setItem(MUT_KEY, musicUserToken);
-
-  return { instance: musicKitInstance, musicUserToken };
+  return searchLyrics(track);
 }
 
-async function fetchSongAttributes(devToken, storefront, songId) {
-  const res = await fetch(
-    `https://api.music.apple.com/v1/catalog/${storefront}/songs/${songId}`,
-    { headers: { Authorization: `Bearer ${devToken}` } }
-  );
-  if (!res.ok) throw new Error(`Song lookup failed (${res.status}). Check the URL or your developer token.`);
-  const data = await res.json();
-  if (!data.data || data.data.length === 0) throw new Error('Song not found in Apple Music catalog.');
-  return data.data[0].attributes;
-}
+async function searchLyrics(track) {
+  const params = new URLSearchParams({
+    artist_name: track.artistName,
+    track_name: track.trackName,
+  });
+  const res = await fetch(`https://lrclib.net/api/search?${params}`);
+  if (!res.ok) throw new Error(`Lyrics search failed (${res.status}). Try again in a moment.`);
 
-async function fetchLyricsTtml(devToken, musicUserToken, storefront, songId) {
-  const res = await fetch(
-    `https://api.music.apple.com/v1/catalog/${storefront}/songs/${songId}/lyrics`,
-    {
-      headers: {
-        Authorization: `Bearer ${devToken}`,
-        'Music-User-Token': musicUserToken,
-      },
-    }
-  );
-  if (res.status === 401) { localStorage.removeItem(MUT_KEY); }
-  if (res.status === 404) throw new Error('No lyrics available for this track in Apple Music.');
-  if (!res.ok) throw new Error(`Lyrics fetch failed (${res.status}).`);
-  const data = await res.json();
-  // The lyrics relationship endpoint may return data as a single object or as an array.
-  const resource = Array.isArray(data.data) ? data.data[0] : data.data;
-  const ttml = resource?.attributes?.ttml;
-  if (!ttml) {
-    console.error('Unexpected lyrics response structure:', JSON.stringify(data));
-    throw new Error('Apple Music returned no lyrics for this track (or the response format was unexpected).');
+  const results = await res.json();
+  const hit = Array.isArray(results) && results.find(r => r.plainLyrics);
+  if (!hit) {
+    throw new Error('No lyrics found for this track. You can paste them manually below.');
   }
-  return ttml;
-}
-
-// Extract plain text from Apple Music TTML.
-// Each <p> element is one lyric line; text content of spans is concatenated.
-function parseTtml(ttml) {
-  const doc = new DOMParser().parseFromString(ttml, 'text/xml');
-  const paragraphs = Array.from(doc.querySelectorAll('p'));
-  return paragraphs
-    .map(p => p.textContent.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .join('\n');
+  return hit.plainLyrics;
 }
 
 // ---------------------------------------------------------------------------
