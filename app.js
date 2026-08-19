@@ -125,7 +125,7 @@ async function getAuthorizedMusicKit(devToken, storefront) {
     MusicKit.configure({
       developerToken: devToken,
       app: { name: 'PlayLyrics', build: '1.0.0' },
-      storefrontId: storefront,
+      storefrontId: 'it',
     });
     musicKitInstance = MusicKit.getInstance();
   }
