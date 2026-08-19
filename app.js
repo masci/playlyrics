@@ -52,7 +52,7 @@ fetchBtn.addEventListener('click', async () => {
 
   try {
     const devToken = await getDeveloperToken();
-    const { musicUserToken } = await getAuthorizedMusicKit(devToken, parsed.storefront);
+    const { musicUserToken } = await getAuthorizedMusicKit(devToken);
 
     // Fetch song metadata and lyrics in parallel
     const [songAttrs, ttml] = await Promise.all([
@@ -103,18 +103,17 @@ async function getDeveloperToken() {
   return token;
 }
 
-async function getAuthorizedMusicKit(devToken, storefront) {
+async function getAuthorizedMusicKit(devToken) {
   if (!musicKitInstance) {
-    await MusicKit.configure({
+    // v1: configure() is synchronous
+    MusicKit.configure({
       developerToken: devToken,
       app: { name: 'PlayLyrics', build: '1.0.0' },
-      storefrontId: storefront,
     });
     musicKitInstance = MusicKit.getInstance();
   }
 
-  // authorize() resolves to the Music User Token string; prefer that over the
-  // instance property, which may not be set yet when the promise first resolves.
+  // authorize() resolves to the Music User Token string
   let musicUserToken = musicKitInstance.musicUserToken;
   if (!musicUserToken) {
     musicUserToken = await musicKitInstance.authorize();
