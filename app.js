@@ -52,7 +52,7 @@ fetchBtn.addEventListener('click', async () => {
 
   try {
     const devToken = await getDeveloperToken();
-    const { musicUserToken } = await getAuthorizedMusicKit(devToken);
+    const { musicUserToken } = await getAuthorizedMusicKit(devToken, parsed.storefront);
 
     // Fetch song metadata and lyrics in parallel
     const [songAttrs, ttml] = await Promise.all([
@@ -103,12 +103,29 @@ async function getDeveloperToken() {
   return token;
 }
 
-async function getAuthorizedMusicKit(devToken) {
+async function getAuthorizedMusicKit(devToken, storefront) {
+  // Validate the developer token with a simple catalog call before handing it
+  // to MusicKit — surfaces token problems as a clear error instead of the
+  // generic "Storefront Country Code error" MusicKit throws internally.
+  const probe = await fetch(
+    `https://api.music.apple.com/v1/storefronts/${storefront}`,
+    { headers: { Authorization: `Bearer ${devToken}` } }
+  );
+  if (!probe.ok) {
+    throw new Error(
+      `Developer token rejected by Apple Music (HTTP ${probe.status}). ` +
+      `Check that APPLE_TEAM_ID, APPLE_KEY_ID, and APPLE_PRIVATE_KEY are set correctly in Netlify.`
+    );
+  }
+
   if (!musicKitInstance) {
-    // v1: configure() is synchronous
+    // v1: configure() is synchronous. Passing storefrontId avoids MusicKit
+    // having to auto-detect it — the pattern recommended by Apple for iOS
+    // (requestStorefrontCountryCode) and the equivalent here.
     MusicKit.configure({
       developerToken: devToken,
       app: { name: 'PlayLyrics', build: '1.0.0' },
+      storefrontId: storefront,
     });
     musicKitInstance = MusicKit.getInstance();
   }
@@ -119,7 +136,7 @@ async function getAuthorizedMusicKit(devToken) {
     musicUserToken = await musicKitInstance.authorize();
   }
   if (!musicUserToken) {
-    throw new Error('Apple Music sign-in succeeded but no user token was returned. Please try again.');
+    throw new Error('Apple Music sign-in completed but no user token was returned. Please try again.');
   }
 
   return { instance: musicKitInstance, musicUserToken };
