@@ -119,21 +119,25 @@ async function getAuthorizedMusicKit(devToken, storefront) {
   }
 
   if (!musicKitInstance) {
-    // v1: configure() is synchronous. Passing storefrontId avoids MusicKit
-    // having to auto-detect it — the pattern recommended by Apple for iOS
-    // (requestStorefrontCountryCode) and the equivalent here.
+    // Matches the configure signature from the MusicKit JS v1 docs exactly.
     MusicKit.configure({
       developerToken: devToken,
-      app: { name: 'PlayLyrics', build: '1.0.0' },
       storefrontId: 'it',
     });
     musicKitInstance = MusicKit.getInstance();
   }
 
-  // authorize() resolves to the Music User Token string
   let musicUserToken = musicKitInstance.musicUserToken;
   if (!musicUserToken) {
-    musicUserToken = await musicKitInstance.authorize();
+    try {
+      musicUserToken = await musicKitInstance.authorize();
+    } catch (err) {
+      // MusicKit v1 sometimes throws "Storefront Country Code error" internally
+      // after auth succeeds but its storefront lookup fails. If the token is
+      // on the instance anyway, treat auth as successful and continue.
+      musicUserToken = musicKitInstance.musicUserToken;
+      if (!musicUserToken) throw err;
+    }
   }
   if (!musicUserToken) {
     throw new Error('Apple Music sign-in completed but no user token was returned. Please try again.');
