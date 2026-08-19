@@ -15,6 +15,18 @@
 
     <form id="lyricsForm" novalidate>
       <div class="field">
+        <label for="appleUrl">Apple Music URL</label>
+        <div class="url-row">
+          <input type="url" id="appleUrl" placeholder="https://music.apple.com/…" autocomplete="off" required>
+          <button type="button" id="fetchBtn">
+            <span id="fetchBtnText">Fetch Lyrics</span>
+            <span id="fetchSpinner" class="spinner" hidden></span>
+          </button>
+        </div>
+        <div id="fetchMsg" class="fetch-msg" hidden></div>
+      </div>
+
+      <div class="field">
         <label for="songTitle">Song title</label>
         <input type="text" id="songTitle" placeholder="e.g. Let It Be — The Beatles" autocomplete="off" required>
       </div>
@@ -22,11 +34,6 @@
       <div class="field">
         <label for="lyrics">Lyrics</label>
         <textarea id="lyrics" rows="14" placeholder="Paste the full song lyrics here…" required></textarea>
-      </div>
-
-      <div class="field">
-        <label for="appleUrl">Apple Music URL</label>
-        <input type="url" id="appleUrl" placeholder="https://music.apple.com/…" autocomplete="off" required>
       </div>
 
       <div class="field">
@@ -53,6 +60,7 @@
   <!-- Off-screen container for QR rendering -->
   <div id="qrContainer" aria-hidden="true"></div>
 
+  <script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="app.js"></script>

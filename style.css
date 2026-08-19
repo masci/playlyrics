@@ -13,6 +13,7 @@
   --text-muted: #6e6e73;
   --border: #d2d2d7;
   --error: #c0392b;
+  --success: #1a7f4b;
   --radius: 10px;
   --shadow: 0 2px 16px rgba(0,0,0,.08);
 }
@@ -166,6 +167,64 @@ input[type="range"]::-moz-range-thumb {
   border: 1px solid #f5c6c2;
   border-radius: 6px;
   padding: 0.65rem 0.85rem;
+}
+
+/* URL field row: input + fetch button side by side */
+.url-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.url-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+#fetchBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  color: var(--primary);
+  border: 1.5px solid var(--primary);
+  border-radius: 8px;
+  padding: 0.65rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+#fetchBtn:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+#fetchBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.fetch-msg {
+  font-size: 0.82rem;
+  margin-top: 0.25rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 5px;
+}
+
+.fetch-msg.ok {
+  color: var(--success);
+  background: #edf7f1;
+  border: 1px solid #b7e2cb;
+}
+
+.fetch-msg.error {
+  color: var(--error);
+  background: #fdf0ef;
+  border: 1px solid #f5c6c2;
 }
 
 button[type="submit"] {
