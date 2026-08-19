@@ -52,19 +52,20 @@ fetchBtn.addEventListener('click', async () => {
 
   try {
     const devToken = await getDeveloperToken();
-    const music    = await getAuthorizedMusicKit(devToken);
+    const { musicUserToken } = await getAuthorizedMusicKit(devToken);
 
     // Fetch song metadata and lyrics in parallel
     const [songAttrs, ttml] = await Promise.all([
       fetchSongAttributes(devToken, parsed.storefront, parsed.songId),
-      fetchLyricsTtml(devToken, music.musicUserToken, parsed.storefront, parsed.songId),
+      fetchLyricsTtml(devToken, musicUserToken, parsed.storefront, parsed.songId),
     ]);
 
     document.getElementById('songTitle').value = `${songAttrs.name} — ${songAttrs.artistName}`;
     document.getElementById('lyrics').value = parseTtml(ttml);
     showFetchMsg('Lyrics fetched! Review them before generating the PDF.', 'ok');
   } catch (err) {
-    showFetchMsg(err.message, 'error');
+    console.error('Fetch lyrics error:', err);
+    showFetchMsg(err?.message || err?.description || String(err) || 'An unknown error occurred.', 'error');
   } finally {
     setFetchLoading(false);
   }
@@ -110,10 +111,18 @@ async function getAuthorizedMusicKit(devToken) {
     });
     musicKitInstance = MusicKit.getInstance();
   }
-  if (!musicKitInstance.isAuthorized) {
-    await musicKitInstance.authorize();
+
+  // authorize() resolves to the Music User Token string; prefer that over the
+  // instance property, which may not be set yet when the promise first resolves.
+  let musicUserToken = musicKitInstance.musicUserToken;
+  if (!musicUserToken) {
+    musicUserToken = await musicKitInstance.authorize();
   }
-  return musicKitInstance;
+  if (!musicUserToken) {
+    throw new Error('Apple Music sign-in succeeded but no user token was returned. Please try again.');
+  }
+
+  return { instance: musicKitInstance, musicUserToken };
 }
 
 async function fetchSongAttributes(devToken, storefront, songId) {
@@ -140,8 +149,13 @@ async function fetchLyricsTtml(devToken, musicUserToken, storefront, songId) {
   if (res.status === 404) throw new Error('No lyrics available for this track in Apple Music.');
   if (!res.ok) throw new Error(`Lyrics fetch failed (${res.status}).`);
   const data = await res.json();
-  const ttml = data?.data?.[0]?.attributes?.ttml;
-  if (!ttml) throw new Error('Apple Music returned no lyrics for this track.');
+  // The lyrics relationship endpoint may return data as a single object or as an array.
+  const resource = Array.isArray(data.data) ? data.data[0] : data.data;
+  const ttml = resource?.attributes?.ttml;
+  if (!ttml) {
+    console.error('Unexpected lyrics response structure:', JSON.stringify(data));
+    throw new Error('Apple Music returned no lyrics for this track (or the response format was unexpected).');
+  }
   return ttml;
 }
 
