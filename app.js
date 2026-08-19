@@ -31,8 +31,9 @@ slider.style.setProperty('--pct', slider.value + '%');
 // Fetch lyrics from Apple Music
 // ---------------------------------------------------------------------------
 
-let cachedDevToken  = null;
+let cachedDevToken   = null;
 let musicKitInstance = null;
+const MUT_KEY = 'pl_music_user_token'; // Music User Token persisted across page loads
 
 fetchBtn.addEventListener('click', async () => {
   const url = document.getElementById('appleUrl').value.trim();
@@ -127,21 +128,27 @@ async function getAuthorizedMusicKit(devToken, storefront) {
     musicKitInstance = MusicKit.getInstance();
   }
 
-  let musicUserToken = musicKitInstance.musicUserToken;
+  // Check our own localStorage cache first — MusicKit's internal session restore
+  // is interrupted by the storefront error, so we persist the token ourselves.
+  let musicUserToken = localStorage.getItem(MUT_KEY) || musicKitInstance.musicUserToken;
+
   if (!musicUserToken) {
     try {
       musicUserToken = await musicKitInstance.authorize();
     } catch (err) {
-      // MusicKit v1 sometimes throws "Storefront Country Code error" internally
-      // after auth succeeds but its storefront lookup fails. If the token is
+      // MusicKit v1 sometimes throws "Storefront Country Code error" after auth
+      // succeeds but its internal storefront lookup fails. If the token landed
       // on the instance anyway, treat auth as successful and continue.
       musicUserToken = musicKitInstance.musicUserToken;
       if (!musicUserToken) throw err;
     }
   }
+
   if (!musicUserToken) {
     throw new Error('Apple Music sign-in completed but no user token was returned. Please try again.');
   }
+
+  localStorage.setItem(MUT_KEY, musicUserToken);
 
   return { instance: musicKitInstance, musicUserToken };
 }
@@ -167,6 +174,7 @@ async function fetchLyricsTtml(devToken, musicUserToken, storefront, songId) {
       },
     }
   );
+  if (res.status === 401) { localStorage.removeItem(MUT_KEY); }
   if (res.status === 404) throw new Error('No lyrics available for this track in Apple Music.');
   if (!res.ok) throw new Error(`Lyrics fetch failed (${res.status}).`);
   const data = await res.json();
